@@ -34,6 +34,12 @@
   apt: pkg={{','.join(jenkins_debian_pkgs)}}
        state=present update_cache=yes
 
+- fail: AWS access key id was not passed in
+  when: pip_aws_access_key_id is not defined
+
+- fail: AWS secret access key was not passed in
+  when: pip_aws_secret_access_key is not defined
+
 - name: Add script to set up environment variables
   template:
     src=jenkins_env.j2 dest={{ jenkins_home }}/jenkins_env
@@ -56,4 +62,20 @@
 - name: Set npm registry
   template:
     src=.npmrc.j2 dest={{ jenkins_home }}/.npmrc
+    owner={{ jenkins_user }} group={{ jenkins_group }} mode=0664
+
+# Set up configuration for pip-accel for caching python requirements
+- name: Create directory for pip-accel config file
+  file: path={{ jenkins_home }}/.pip-accel state=directory
+    owner={{ jenkins_user }} group={{ jenkins_group }} mode=0777 recurse=yes
+
+- name: Create pip-accel config file
+  template:
+    src=pip-accel.conf.j2 dest={{ jenkins_home }}/.pip-accel/pip-accel.conf
+    owner={{ jenkins_user }} group={{ jenkins_group }} mode=0664
+
+# Set up configuration for pip-accel to use S3
+- name: Create boto config file with AWS credentials for the pip cache
+  template:
+    src=.boto.j2 dest={{ jenkins_home }}/.boto
     owner={{ jenkins_user }} group={{ jenkins_group }} mode=0664

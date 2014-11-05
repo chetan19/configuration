@@ -1,0 +1,5 @@
+{
+    "github_oauth_token": "{{ user `github_oauth_token` }}",
+    "pip_aws_access_key_id": "{{ user `pip_aws_access_key_id` }}",
+    "pip_aws_secret_access_key": "{{ user `pip_aws_secret_access_key` }}"
+}

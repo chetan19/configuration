@@ -3,6 +3,8 @@
     "aws_access_key": "{{env `AWS_ACCESS_KEY_ID`}}",
     "aws_secret_key": "{{env `AWS_SECRET_ACCESS_KEY`}}",
     "github_oauth_token": "{{env `GITHUB_TOKEN`}}",
+    "pip_aws_access_key": "{{env `PIP_AWS_ACCESS_KEY_ID`}}",
+    "pip_aws_secret_key": "{{env `PIP_AWS_SECRET_ACCESS_KEY`}}",
     "playbook_remote_dir": "/tmp/packer-edx-playbooks",
     "ami": "{{env `JENKINS_WORKER_AMI`}}"
   },
@@ -28,6 +30,10 @@
     "source": "../../requirements.txt",
     "destination": "{{user `playbook_remote_dir`}}/requirements.txt"
   }, {
+    "type": "file",
+    "source": "extra_vars.json",
+    "destination": "{{user `playbook_remote_dir`}}/extra_vars.json"
+  }, {
     "type": "shell",
     "inline": ["cd {{user `playbook_remote_dir`}}",
       "virtualenv packer-venv",
@@ -35,7 +41,7 @@
       "pip install -q -r requirements.txt",
       "echo '[jenkins_worker]' > inventory.ini",
       "echo 'localhost' >> inventory.ini",
-      "ansible-playbook edx-east/jenkins_worker.yml -i inventory.ini -c local -e 'github_oauth_token={{user `github_oauth_token` }}' -vvvv"]
+      "ansible-playbook edx-east/jenkins_worker.yml -i inventory.ini -c local -e '@extra_vars.json' -vvvv"]
   }, {
     "type": "shell",
     "inline": ["cd {{user `playbook_remote_dir`}}",
