@@ -49,6 +49,7 @@ def potential_devices(root_device):
     all_devices = os.listdir(dirname(root_device))
     all_devices = filter( relevant_devices, all_devices)
 
+    logging.info("Potential devices: {}".format(all_devices))
     if len(all_devices) > 1:
         all_devices.remove(basename(root_device))
 
