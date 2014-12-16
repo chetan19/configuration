@@ -35,7 +35,7 @@
 # rather than compiled each time.
 - name: Install pip-accel for caching python requirements
   pip: >
-    name='git+https://github.com/paylogic/pip-accel.git@0.18#egg=pip-accel'
+    name='pip-accel' version='0.21.1'
     virtualenv={{ jenkins_home }}/edx-venv
     virtualenv_command=virtualenv-2.7
   sudo_user: "{{ jenkins_user }}"
@@ -49,31 +49,48 @@
     virtualenv_command=virtualenv-2.7
   sudo_user: "{{ jenkins_user }}"
 
-- name: Install edx-platform requirements using pip-accel
+# WORKAROUND for pip-accel
+# Install a version of pip that will work with the exists-action flag
+- name: Install pip 1.4.1 patched
   pip: >
-    requirements={{ jenkins_home }}/shallow-clone/requirements/edx/{{ item }}
+    name='git+https://github.com/jzoldak/pip.git@v1.4.1patch772#egg=pip'
+    virtualenv={{ jenkins_home }}/edx-venv
+    virtualenv_command=virtualenv-2.7
+  sudo_user: "{{ jenkins_user }}"
+
+# WORKAROUND for pip-accel
+# Install Shapely which doesn't install cleanly with pip-accel
+- name: Install Shapely==1.2.16
+  pip: >
+    name='Shapely' version='1.2.16'
+    virtualenv={{ jenkins_home }}/edx-venv
+    virtualenv_command=virtualenv-2.7
+    executable=pip
+  sudo_user: "{{ jenkins_user }}"
+
+# WORKAROUND for pip-accel
+# Install unittest2 which is needed by lettuce
+- name: Install unittest2
+  pip: >
+    name='unittest2'
     virtualenv={{ jenkins_home }}/edx-venv
     virtualenv_command=virtualenv-2.7
     executable=pip-accel
+  sudo_user: "{{ jenkins_user }}"
 
+- name: Install edx-platform requirements using pip-accel
+  pip: >
+    requirements={{ jenkins_home }}/shallow-clone/requirements/edx/{{ item }}
+    extra_args="--exists-action=w"
+    virtualenv={{ jenkins_home }}/edx-venv
+    virtualenv_command=virtualenv-2.7
+    executable=pip-accel
   with_items:
     - pre.txt
     - github.txt
     - base.txt
     - post.txt
-  sudo_user: "{{ jenkins_user }}"
-
-# Paver has a non-conforming setup.py file which does not play nicely
-# with pip-accel. See https://github.com/paylogic/pip-accel/issues/37
-# Install using the native pip instead.
-- name: Install paver requirements using pip
-  pip: >
-    requirements={{ jenkins_home }}/shallow-clone/requirements/edx/paver.txt
-    extra_args="--exists-action w --download-cache ~/.pip/download-cache"
-    virtualenv={{ jenkins_home }}/edx-venv
-    virtualenv_command=virtualenv-2.7
-    executable=pip
-
+    - paver.txt
   sudo_user: "{{ jenkins_user }}"
 
 # Archive the current state of the virtualenv
