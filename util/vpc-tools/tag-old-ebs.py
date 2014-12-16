@@ -10,7 +10,7 @@ import logging
 import subprocess
 import time
 import os
-from os.path import join, exists, isdir, islink, realpath, basename
+from os.path import join, exists, isdir, islink, realpath, basename, dirname
 import yaml
 # needs to be pip installed
 import netaddr
@@ -42,7 +42,55 @@ def tags_for_hostname(hostname, mapping):
             tags.update(value)
 
     return tags
-        
+
+def potential_devices(root_device):
+    relevant_devices = lambda x: x.startswith(basename(root_device))
+
+    all_devices = os.listdir(dirname(root_device))
+    all_devices = filter( relevant_devices, all_devices)
+
+    if len(all_devices) > 1:
+        all_devices.remove(basename(root_device))
+
+    return all_devices
+
+def get_tags_for_disk(mountpoint):
+    tag_data = {}
+    # Look at some files on it to determine:
+    #  - hostname
+    #  - environment
+    #  - deployment
+    #  - cluster
+    #  - instance-id
+    #  - date created
+    hostname_file = join(mountpoint, "etc", "hostname")
+    edx_dir = join(mountpoint, 'edx', 'app')
+    if exists(hostname_file):
+        # This means this was a root volume.
+        with open(hostname_file, 'r') as f:
+            hostname = f.readline().strip()
+            tag_data['hostname'] = hostname
+
+        if exists(edx_dir) and isdir(edx_dir):
+            # This is an ansible related ami, we'll try to map
+            # the hostname to a knows deployment and cluster.
+            cluster_tags = tags_for_hostname(hostname, mappings)
+            tag_data.update(cluster_tags)
+        else:
+            # Not an ansible created root volume.
+            tag_data['cluster'] = 'unknown'
+    else:
+        # Not a root volume
+        tag_data['cluster'] = "unknown"
+
+    instance_file = join(mountpoint, "var", "lib", "cloud", "instance")
+    if exists(instance_file) and islink(instance_file):
+        resolved_path = realpath(instance_file)
+        old_instance_id = basename(resolved_path)
+        tag_data['instance-id'] = old_instance_id
+
+    return tag_data
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Tag unattached ebs volumes.")
@@ -79,7 +127,7 @@ if __name__ == "__main__":
     id_info = boto.utils.get_instance_identity()['document']
     instance_id = id_info['instanceId']
     az = id_info['availabilityZone']
-    device = args.device
+    root_device = args.device
     mountpoint = args.mountpoint
 
     # Find all unattached volumes
@@ -94,66 +142,45 @@ if __name__ == "__main__":
 
         ec2.attach_volume(vol.id, instance_id, device)
 
-        try:
-            # Wait for the volume to finish attaching.
-            waiting_msg = "Waiting for {} to be available at {}"
-            while not exists(device):
-                time.sleep(2)
-                logging.debug(waiting_msg.format(vol.id, device))
+        # Because a volume might have multiple mount points
+        devices_on_volume = potential_devices(root_device)
+        if len(devices_on_volume) > 1:
+            vol.add_tag("devices_on_volume", str(devices_on_volume))
+            # Don't tag in this case because the different devices
+            # may have conflicting tags.
+            logging.info("Skipping {} because it has multiple mountpoints.".format(vol.id))
+            logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume))
+            continue
 
-            # Mount the volume
-            subprocess.check_call(["sudo", "mount", device, mountpoint])
+        for device in devices_on_volume:
+            try:
+                # Wait for the volume to finish attaching.
+                waiting_msg = "Waiting for {} to be available at {}"
+                while not exists(device):
+                    time.sleep(2)
+                    logging.debug(waiting_msg.format(vol.id, device))
 
-            tag_data = {}
-            # Look at some files on it to determine:
-            #  - hostname
-            #  - environment
-            #  - deployment
-            #  - cluster
-            #  - instance-id
-            #  - date created
-            hostname_file = join(mountpoint, "etc", "hostname")
-            edx_dir = join(mountpoint, 'edx', 'app')
-            if exists(hostname_file):
-                # This means this was a root volume.
-                with open(hostname_file, 'r') as f:
-                    hostname = f.readline().strip()
-                    tag_data['hostname'] = hostname
+                # Mount the volume
+                subprocess.check_call(["sudo", "mount", device, mountpoint])
 
-                if exists(edx_dir) and isdir(edx_dir):
-                    # This is an ansible related ami, we'll try to map
-                    # the hostname to a knows deployment and cluster.
-                    cluster_tags = tags_for_hostname(hostname, mappings)
-                    tag_data.update(cluster_tags)
+                # Learn all tags we can know from content on disk.
+                tag_data = get_tags_for_disk(mountpoint)
+                tag_data['created'] = vol.create_time
+
+                # If they are found tag the instance with them
+                if args.noop:
+                    logging.info("Would have tagged {} with: \n{}".format(vol.id, str(tag_data)))
                 else:
-                    # Not an ansible created root volume.
-                    tag_data['cluster'] = 'unknown'
-            else:
-                # Not a root volume
-                tag_data['cluster'] = "unknown"
+                    logging.info("Tagging {} with: \n{}".format(vol.id, str(tag_data)))
+                    vol.add_tags(tag_data)
 
-            instance_file = join(mountpoint, "var", "lib", "cloud", "instance")
-            if exists(instance_file) and islink(instance_file):
-                resolved_path = realpath(instance_file)
-                old_instance_id = basename(resolved_path)
-                tag_data['instance-id'] = old_instance_id
-
-            tag_data['created'] = vol.create_time
-
-            # If they are found tag the instance with them
-            if args.noop:
-                logging.info("Would have tagged {} with: \n{}".format(vol.id, str(tag_data)))
-            else:
-                logging.info("Tagging {} with: \n{}".format(vol.id, str(tag_data)))
-                vol.add_tags(tag_data)
-
-        finally:
-            # Un-mount the volume
-            subprocess.check_call(['sudo', 'umount', mountpoint])
-            # detach the volume
-            ec2.detach_volume(vol.id)
-            time.sleep(2)
-            while exists(device) or ec2.get_all_volumes(vol.id)[0].status != "available":
+            finally:
+                # Un-mount the volume
+                subprocess.check_call(['sudo', 'umount', mountpoint])
+                # detach the volume
+                ec2.detach_volume(vol.id)
                 time.sleep(2)
-                logging.debug("Waiting for {} to be detached.".format(vol.id))
+                while exists(device) or ec2.get_all_volumes(vol.id)[0].status != "available":
+                    time.sleep(2)
+                    logging.debug("Waiting for {} to be detached.".format(vol.id))
 
