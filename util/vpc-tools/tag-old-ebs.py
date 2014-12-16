@@ -49,7 +49,7 @@ def potential_devices(root_device):
     all_devices = os.listdir(dirname(root_device))
     all_devices = filter( relevant_devices, all_devices)
 
-    logging.info("Potential devices: {}".format(all_devices))
+    logging.info("Potential devices on {}: {}".format(root_device, all_devices))
     if len(all_devices) > 1:
         all_devices.remove(basename(root_device))
 
@@ -143,6 +143,12 @@ if __name__ == "__main__":
 
         try:
             ec2.attach_volume(vol.id, instance_id, root_device)
+            # Wait for the volume to finish attaching.
+            waiting_msg = "Waiting for {} to be available at {}"
+            while not exists(device):
+                time.sleep(2)
+                logging.debug(waiting_msg.format(vol.id, device))
+
 
             # Because a volume might have multiple mount points
             devices_on_volume = potential_devices(root_device)
@@ -155,12 +161,6 @@ if __name__ == "__main__":
             else:
                 device = devices_on_volume[0]
                 try:
-                    # Wait for the volume to finish attaching.
-                    waiting_msg = "Waiting for {} to be available at {}"
-                    while not exists(device):
-                        time.sleep(2)
-                        logging.debug(waiting_msg.format(vol.id, device))
-
                     # Mount the volume
                     subprocess.check_call(["sudo", "mount", device, mountpoint])
 
