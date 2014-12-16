@@ -16,6 +16,7 @@ import yaml
 import netaddr
 
 LOG_FORMAT = "%(asctime)s %(levelname)s - %(filename)s:%(lineno)s - %(message)s"
+
 log_level = logging.INFO
 
 def tags_for_hostname(hostname, mapping):
@@ -138,6 +139,8 @@ if __name__ == "__main__":
     logging.debug("Found {} unattached volumes in {}".format(len(potential_volumes), az))
 
     for vol in potential_volumes:
+        if "cluster" in vol.tags:
+            continue
         # Attach volume to the instance running this process
         logging.debug("Trying to attach {} to {} at {}".format(
             vol.id, instance_id, root_device))
