@@ -138,9 +138,9 @@ if __name__ == "__main__":
     for vol in potential_volumes:
         # Attach volume to the instance running this process
         logging.debug("Trying to attach {} to {} at {}".format(
-            vol.id, instance_id, device))
+            vol.id, instance_id, root_device))
 
-        ec2.attach_volume(vol.id, instance_id, device)
+        ec2.attach_volume(vol.id, instance_id, root_device)
 
         # Because a volume might have multiple mount points
         devices_on_volume = potential_devices(root_device)
