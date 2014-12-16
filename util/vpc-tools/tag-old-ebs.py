@@ -180,9 +180,12 @@ if __name__ == "__main__":
                     subprocess.check_call(['sudo', 'umount', mountpoint])
         finally:
             # detach the volume
-            ec2.detach_volume(vol.id)
-            time.sleep(2)
-            while exists(root_device) or ec2.get_all_volumes(vol.id)[0].status != "available":
+            while exists(root_device):
+                if ec2.get_all_volumes(vol.id)[0].status != "available":
+                    try:
+                        ec2.detach_volume(vol.id)
+                    except boto.exception.EC2ResponseError as e:
+                        logging.warning("Failed to detach volume.  Will try again in a bit.")
                 time.sleep(2)
                 logging.debug("Waiting for {} to be detached.".format(vol.id))
 
