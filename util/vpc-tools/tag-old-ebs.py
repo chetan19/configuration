@@ -145,9 +145,9 @@ if __name__ == "__main__":
             ec2.attach_volume(vol.id, instance_id, root_device)
             # Wait for the volume to finish attaching.
             waiting_msg = "Waiting for {} to be available at {}"
-            while not exists(device):
+            while not exists(root_device):
                 time.sleep(2)
-                logging.debug(waiting_msg.format(vol.id, device))
+                logging.debug(waiting_msg.format(vol.id, root_device))
 
 
             # Because a volume might have multiple mount points
