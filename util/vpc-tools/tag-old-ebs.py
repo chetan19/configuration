@@ -150,7 +150,7 @@ if __name__ == "__main__":
                 # Don't tag in this case because the different devices
                 # may have conflicting tags.
                 logging.info("Skipping {} because it has multiple mountpoints.".format(vol.id))
-                logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume)))
+                logging.info("{} has mountpoints {}".format(vol.id, str(devices_on_volume)))
             else:
                 device = devices_on_volume[0]
                 try:
@@ -180,7 +180,7 @@ if __name__ == "__main__":
             # detach the volume
             ec2.detach_volume(vol.id)
             time.sleep(2)
-            while exists(device) or ec2.get_all_volumes(vol.id)[0].status != "available":
+            while exists(root_device) or ec2.get_all_volumes(vol.id)[0].status != "available":
                 time.sleep(2)
                 logging.debug("Waiting for {} to be detached.".format(vol.id))
 
