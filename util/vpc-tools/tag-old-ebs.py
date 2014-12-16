@@ -140,47 +140,47 @@ if __name__ == "__main__":
         logging.debug("Trying to attach {} to {} at {}".format(
             vol.id, instance_id, root_device))
 
-        ec2.attach_volume(vol.id, instance_id, root_device)
+        try:
+            ec2.attach_volume(vol.id, instance_id, root_device)
 
-        # Because a volume might have multiple mount points
-        devices_on_volume = potential_devices(root_device)
-        if len(devices_on_volume) > 1:
-            vol.add_tag("devices_on_volume", str(devices_on_volume))
-            # Don't tag in this case because the different devices
-            # may have conflicting tags.
-            logging.info("Skipping {} because it has multiple mountpoints.".format(vol.id))
-            logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume)))
-            continue
+            # Because a volume might have multiple mount points
+            devices_on_volume = potential_devices(root_device)
+            if len(devices_on_volume) != 1:
+                vol.add_tag("devices_on_volume", str(devices_on_volume))
+                # Don't tag in this case because the different devices
+                # may have conflicting tags.
+                logging.info("Skipping {} because it has multiple mountpoints.".format(vol.id))
+                logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume)))
+            else:
+                device = devices_on_volume[0]
+                try:
+                    # Wait for the volume to finish attaching.
+                    waiting_msg = "Waiting for {} to be available at {}"
+                    while not exists(device):
+                        time.sleep(2)
+                        logging.debug(waiting_msg.format(vol.id, device))
 
-        for device in devices_on_volume:
-            try:
-                # Wait for the volume to finish attaching.
-                waiting_msg = "Waiting for {} to be available at {}"
-                while not exists(device):
-                    time.sleep(2)
-                    logging.debug(waiting_msg.format(vol.id, device))
+                    # Mount the volume
+                    subprocess.check_call(["sudo", "mount", device, mountpoint])
 
-                # Mount the volume
-                subprocess.check_call(["sudo", "mount", device, mountpoint])
+                    # Learn all tags we can know from content on disk.
+                    tag_data = get_tags_for_disk(mountpoint)
+                    tag_data['created'] = vol.create_time
 
-                # Learn all tags we can know from content on disk.
-                tag_data = get_tags_for_disk(mountpoint)
-                tag_data['created'] = vol.create_time
-
-                # If they are found tag the instance with them
-                if args.noop:
-                    logging.info("Would have tagged {} with: \n{}".format(vol.id, str(tag_data)))
-                else:
-                    logging.info("Tagging {} with: \n{}".format(vol.id, str(tag_data)))
-                    vol.add_tags(tag_data)
-
-            finally:
-                # Un-mount the volume
-                subprocess.check_call(['sudo', 'umount', mountpoint])
-                # detach the volume
-                ec2.detach_volume(vol.id)
+                    # If they are found tag the instance with them
+                    if args.noop:
+                        logging.info("Would have tagged {} with: \n{}".format(vol.id, str(tag_data)))
+                    else:
+                        logging.info("Tagging {} with: \n{}".format(vol.id, str(tag_data)))
+                        vol.add_tags(tag_data)
+                finally:
+                    # Un-mount the volume
+                    subprocess.check_call(['sudo', 'umount', mountpoint])
+        finally:
+            # detach the volume
+            ec2.detach_volume(vol.id)
+            time.sleep(2)
+            while exists(device) or ec2.get_all_volumes(vol.id)[0].status != "available":
                 time.sleep(2)
-                while exists(device) or ec2.get_all_volumes(vol.id)[0].status != "available":
-                    time.sleep(2)
-                    logging.debug("Waiting for {} to be detached.".format(vol.id))
+                logging.debug("Waiting for {} to be detached.".format(vol.id))
 
