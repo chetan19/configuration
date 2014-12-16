@@ -44,16 +44,17 @@ def tags_for_hostname(hostname, mapping):
     return tags
 
 def potential_devices(root_device):
+    device_dir = dirname(root_device)
     relevant_devices = lambda x: x.startswith(basename(root_device))
 
-    all_devices = os.listdir(dirname(root_device))
+    all_devices = os.listdir(device_dir)
     all_devices = filter( relevant_devices, all_devices)
 
     logging.info("Potential devices on {}: {}".format(root_device, all_devices))
     if len(all_devices) > 1:
         all_devices.remove(basename(root_device))
 
-    return all_devices
+    return map(lambda x: join(device_dir, x), all_devices)
 
 def get_tags_for_disk(mountpoint):
     tag_data = {}
