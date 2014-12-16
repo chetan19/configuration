@@ -149,7 +149,7 @@ if __name__ == "__main__":
             # Don't tag in this case because the different devices
             # may have conflicting tags.
             logging.info("Skipping {} because it has multiple mountpoints.".format(vol.id))
-            logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume))
+            logging.debug("{} has mountpoints {}".format(vol.id, str(devices_on_volume)))
             continue
 
         for device in devices_on_volume:
