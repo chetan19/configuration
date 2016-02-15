@@ -38,7 +38,7 @@
   when: ansible_distribution == 'Amazon'
 
 - name: install apt repository
-  apt_repository_1.8: repo="{{ NEWRELIC_DEBIAN_REPO }}" update_cache=yes validate_certs=no
+  apt_repository: repo="{{ NEWRELIC_DEBIAN_REPO }}" update_cache=yes
   when: ansible_distribution == 'Ubuntu'
 
 - name: install newrelic agent (apt)
@@ -55,24 +55,13 @@
   with_items: newrelic_redhat_pkgs
   when: ansible_distribution == 'Amazon'
 
-- name: configure the agent with the license key
-  shell: >
-    nrsysmond-config --set license_key="{{ NEWRELIC_LICENSE_KEY }}"
-    ssl=true
+- name: configure the agent
+  template:
+    src: "etc/newrelic/nrsysmond.cfg.j2"
+    dest: "/etc/newrelic/nrsysmond.cfg"
+    owner: "newrelic"
+    group: "newrelic"
+    mode: 0640
 
 - name: ensure started and enabled
   service: name=newrelic-sysmond state=restarted enabled=yes
-
-  # tags=deploy here so that if we are deploying
-  # an application update on a server the config
-  # for the plugin will be updated with the appropriate
-  # edp
-- include: newrelic-logwatcher.yml tags=deploy
-  when:
-  - NEWRELIC_LOGWATCH
-  - ansible_distribution == 'Ubuntu'
-
-- include: s3-watcher.yml tags=deploy
-  when:
-  - NEWRELIC_S3_WATCHER
-  - ansible_distribution == 'Ubuntu'

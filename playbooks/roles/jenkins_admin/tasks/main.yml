@@ -34,7 +34,7 @@
   when: JENKINS_ADMIN_S3_PROFILE.secret_key is not defined
 
 - name: add admin specific apt repositories
-  apt_repository_1.8: repo="{{ item }}" state=present update_cache=yes validate_certs=no
+  apt_repository: repo="{{ item }}" state=present update_cache=yes
   with_items: jenkins_admin_debian_repos
 
 - name: create the scripts directory
@@ -117,7 +117,7 @@
 
 # adding chris-lea nodejs repo
 - name: add ppas for current versions of nodejs
-  apt_repository_1.8: repo="{{ jenkins_chrislea_ppa }}"
+  apt_repository: repo="{{ jenkins_chrislea_ppa }}"
 
 - name: install system packages for edxapp virtualenvs
   apt: pkg={{','.join(jenkins_admin_debian_pkgs)}} state=present update_cache=yes
@@ -137,6 +137,45 @@
     version={{ item.version }}
     user_install=no
   with_items: jenkins_admin_gem_pkgs
+
+- name: get s3 one time url
+  local_action:
+    module: "s3"
+    bucket: "{{ JENKINS_ADMIN_BACKUP_BUCKET }}"
+    object: "{{ JENKINS_ADMIN_BACKUP_S3_KEY }}"
+    mode: "geturl"
+    expiration: 30
+  register: s3_one_time_url
+  when: JENKINS_ADMIN_BACKUP_BUCKET is defined and JENKINS_ADMIN_BACKUP_S3_KEY is defined
+
+- name: download s3 backup
+  get_url:
+    url: "{{ s3_one_time_url.url }}"
+    dest: "/tmp/{{ JENKINS_ADMIN_BACKUP_S3_KEY | basename }}"
+    mode: "0644"
+    owner: "{{ jenkins_user }}"
+  when: JENKINS_ADMIN_BACKUP_BUCKET is defined and JENKINS_ADMIN_BACKUP_S3_KEY is defined
+
+- name: stop jenkins
+  service:
+    name: "jenkins"
+    state: "stopped"
+  when: JENKINS_ADMIN_BACKUP_BUCKET is defined and JENKINS_ADMIN_BACKUP_S3_KEY is defined
+
+- name: restore the backup
+  unarchive:
+    src: "/tmp/jenkins_backup.tar.gz"
+    dest: "{{ jenkins_home }}/.."
+    owner: "{{ jenkins_user }}"
+    copy: false
+  when: JENKINS_ADMIN_BACKUP_BUCKET is defined and JENKINS_ADMIN_BACKUP_S3_KEY is defined
+
+# When testing consider commenting this out
+- name: start jenkins
+  service:
+    name: "jenkins"
+    state: "started"
+  when: JENKINS_ADMIN_BACKUP_BUCKET and JENKINS_BACKUP_S3_KEY
 
 - include: nat_monitor.yml
   tags:

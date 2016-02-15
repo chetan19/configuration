@@ -13,9 +13,15 @@
 # the role name are service name differ by _ and -, the latter isn't safe
 # random corners of ansible/jinga/python variable expansion.
 dependencies:
+  - common
   - role: edx_service
-    edx_role_name: "{{ xqwatcher_role_name }}"
     edx_service_name: "{{ xqwatcher_service_name }}"
+    edx_service_repos: "{{ XQWATCHER_REPOS }}"
+    edx_service_user: "{{ xqwatcher_user }}"
+    edx_service_home: "{{ xqwatcher_app_dir }}"
+    edx_service_packages:
+        debian: "{{ xqwatcher_debian_pkgs }}"
+        redhat: "{{ xqwatcher_redhat_pkgs }}"
   - role: supervisor
     supervisor_app_dir: "{{ xqwatcher_supervisor_app_dir }}"
     supervisor_data_dir: "{{ xqwatcher_supervisor_data_dir }}"

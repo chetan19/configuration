@@ -1,40 +1,38 @@
 # Travis CI configuration file for running tests
 language: python
+
+branches:
+  only:
+    - master
+
 python:
   - "2.7"
+
+services:
+  - docker
+  
+addons:
+  apt:
+    packages:
+      - nodejs
+      - python-demjson
+
+before_install:
+  - sudo apt-get -y update
+  - sudo apt-get -y install -o Dpkg::Options::="--force-confold" docker-engine
+
 install:
-  - "sudo apt-get install -y nodejs python-demjson"
   - "pip install --allow-all-external -r requirements.txt"
   - "pip install --allow-all-external demjson"
+
+env:
+  - MAKE_TARGET=test.syntax
+  - MAKE_TARGET=test.edx_east_roles
+  - MAKE_TARGET=docker.test.shard SHARD=0 SHARDS=3
+  - MAKE_TARGET=docker.test.shard SHARD=1 SHARDS=3
+  - MAKE_TARGET=docker.test.shard SHARD=2 SHARDS=3
+
 script:
-  - |
-    for yml in $(find . -name "*.yml"); do
-      python -c "import sys,yaml; yaml.load(open(sys.argv[1]))" $yml >/dev/null
-      if [[ $? -ne 0 ]]; then
-        echo "ERROR parsing $yml"
-        exit 1
-      fi
-    done
-  - |
-    for json in $(find . -name "*.json"); do
-      jsonlint -v $json
-      if [[ $? -ne 0 ]]; then
-        echo "ERROR parsing $json"
-        exit 1
-      fi
-    done
-  - |
-    set -e
-    cd playbooks/edx-east
-    ROLE_DIRS=$(/bin/ls -d roles/*)
-    cat <<EOF >travis-test.yml
-    - name: Play to test all roles
-      hosts: all
-      roles:
-    EOF
-    for role_dir in $ROLE_DIRS; do
-        echo "    - $(basename $role_dir)" >> travis-test.yml
-    done
-
-    ansible-playbook -i localhost, --syntax-check travis-test.yml
-
+  - docker --version
+  - make --version
+  - travis_wait 50 make --keep-going $MAKE_TARGET SHARD=$SHARD SHARDS=$SHARDS

@@ -6,14 +6,24 @@ import hipchat
 import os
 import subprocess
 import traceback
+import socket
+import time
 
 # Services that should be checked for migrations.
 MIGRATION_COMMANDS = {
-        'lms': "{python} {code_dir}/manage.py lms migrate --noinput --settings=aws --db-dry-run --merge",
-        'cms': "{python} {code_dir}/manage.py cms migrate --noinput --settings=aws --db-dry-run --merge",
+        'lms':     ". {env_file}; {python} {code_dir}/manage.py lms migrate --noinput --list --settings=aws",
+        'cms':     ". {env_file}; {python} {code_dir}/manage.py cms migrate --noinput --list --settings=aws",
         'xqueue': "{python} {code_dir}/manage.py xqueue migrate --noinput --settings=aws --db-dry-run --merge",
+        'ecommerce':     ". {env_file}; {python} {code_dir}/manage.py migrate --noinput --list",
+        'programs':     ". {env_file}; {python} {code_dir}/manage.py migrate --noinput --list",
+        'insights':      ". {env_file}; {python} {code_dir}/manage.py migrate --noinput --list",
+        'analytics_api': ". {env_file}; {python} {code_dir}/manage.py migrate --noinput --list"
     }
 HIPCHAT_USER = "PreSupervisor"
+
+# Max amount of time to wait for tags to be applied.
+MAX_BACKOFF = 120
+INITIAL_BACKOFF = 1
 
 def services_for_instance(instance_id):
     """
@@ -63,13 +73,51 @@ if __name__ == '__main__':
             help="Location of the edx-platform code.")
     migration_args.add_argument("--edxapp-python",
             help="Path to python to use for executing migration check.")
+    migration_args.add_argument("--edxapp-env",
+            help="Location of the ecommerce environment file.")
 
     xq_migration_args = parser.add_argument_group("xqueue_migrations",
             "Args for running xqueue migration checks.")
     xq_migration_args.add_argument("--xqueue-code-dir",
-            help="Location of the edx-platform code.")
+            help="Location of the xqueue code.")
     xq_migration_args.add_argument("--xqueue-python",
             help="Path to python to use for executing migration check.")
+
+    ecom_migration_args = parser.add_argument_group("ecommerce_migrations",
+            "Args for running ecommerce migration checks.")
+    ecom_migration_args.add_argument("--ecommerce-python",
+        help="Path to python to use for executing migration check.")
+    ecom_migration_args.add_argument("--ecommerce-env",
+        help="Location of the ecommerce environment file.")
+    ecom_migration_args.add_argument("--ecommerce-code-dir",
+        help="Location to of the ecommerce code.")
+
+    programs_migration_args = parser.add_argument_group("programs_migrations",
+            "Args for running programs migration checks.")
+    programs_migration_args.add_argument("--programs-python",
+        help="Path to python to use for executing migration check.")
+    programs_migration_args.add_argument("--programs-env",
+        help="Location of the programs environment file.")
+    programs_migration_args.add_argument("--programs-code-dir",
+        help="Location to of the programs code.")
+
+    insights_migration_args = parser.add_argument_group("insights_migrations",
+            "Args for running insights migration checks.")
+    insights_migration_args.add_argument("--insights-python",
+        help="Path to python to use for executing migration check.")
+    insights_migration_args.add_argument("--insights-env",
+        help="Location of the insights environment file.")
+    insights_migration_args.add_argument("--insights-code-dir",
+        help="Location to of the insights code.")
+
+    analyticsapi_migration_args = parser.add_argument_group("analytics_api_migrations",
+            "Args for running analytics_api migration checks.")
+    analyticsapi_migration_args.add_argument("--analytics-api-python",
+        help="Path to python to use for executing migration check.")
+    analyticsapi_migration_args.add_argument("--analytics-api-env",
+        help="Location of the analytics_api environment file.")
+    analyticsapi_migration_args.add_argument("--analytics-api-code-dir",
+        help="Location to of the analytics_api code.")
 
     hipchat_args = parser.add_argument_group("hipchat",
             "Args for hipchat notification.")
@@ -105,31 +153,61 @@ if __name__ == '__main__':
         # Needs to exit with 1 instead of 0 to prevent
         # services from starting.
         exit(1)
+    time_left = MAX_BACKOFF
+    backoff = INITIAL_BACKOFF
+
+    environment = None
+    deployment = None
+    play = None
+    while time_left > 0:
+        try:
+            environment, deployment, play = edp_for_instance(instance_id)
+            prefix = "{environment}-{deployment}-{play}-{instance_id}".format(
+                environment=environment,
+                deployment=deployment,
+                play=play,
+                instance_id=instance_id)
+            break
+        except Exception as e:
+            print("Failed to get EDP for {}: {}".format(instance_id, str(e)))
+            # With the time limit being 2 minutes we will
+            # try 5 times before giving up.
+            time.sleep(backoff)
+            time_left -= backoff
+            backoff = backoff * 2
+
+    if environment is None or deployment is None or play is None:
+        msg = "Unable to retrieve environment, deployment, or play tag."
+        print(msg)
+        if notify:
+            notify("{} : {}".format(prefix, msg))
+        exit(0)
+
+    #get the hostname of the sandbox
+    hostname = socket.gethostname()
 
     try:
-        environment, deployment, play = edp_for_instance(instance_id)
-        prefix = "{environment}-{deployment}-{play}-{instance_id}".format(
-            environment=environment,
-            deployment=deployment,
-            play=play,
-            instance_id=instance_id)
-    except:
-        print("Failed to get EDP for {}".format(instance_id))
+        #get the list of the volumes, that are attached to the instance
+        volumes = ec2.get_all_volumes(filters={'attachment.instance-id': instance_id})
+    
+        for volume in volumes:
+            volume.add_tags({"hostname": hostname,
+                             "environment": environment,
+                             "deployment": deployment,
+                             "cluster": play,
+                             "instance-id": instance_id,
+                             "created": volume.create_time })
+    except Exception as e:
+        msg = "Failed to tag volumes associated with {}: {}".format(instance_id, str(e))
+        print(msg)
+        if notify:
+            notify(msg)
 
     try:
         for service in services_for_instance(instance_id):
             if service in MIGRATION_COMMANDS:
                 # Do extra migration related stuff.
-                if (service == 'lms' or service == 'cms') and args.edxapp_code_dir:
-                    cmd = MIGRATION_COMMANDS[service].format(python=args.edxapp_python,
-                        code_dir=args.edxapp_code_dir)
-                    if os.path.exists(args.edxapp_code_dir):
-                        os.chdir(args.edxapp_code_dir)
-                        # Run migration check command.
-                        output = subprocess.check_output(cmd, shell=True)
-                        if 'Migrating' in output:
-                            raise Exception("Migrations have not been run for {}".format(service))
-                elif service == 'xqueue' and args.xqueue_code_dir:
+                if service == 'xqueue' and args.xqueue_code_dir:
                     cmd = MIGRATION_COMMANDS[service].format(python=args.xqueue_python,
                         code_dir=xqueue_code_dir)
                     if os.path.exists(args.xqueue_code_dir):
@@ -138,13 +216,34 @@ if __name__ == '__main__':
                         output = subprocess.check_output(cmd, shell=True)
                         if 'Migrating' in output:
                             raise Exception("Migrations have not been run for {}".format(service))
-    
+                else:
+                    new_services = {
+                        "lms": {'python': args.edxapp_python, 'env_file': args.edxapp_env, 'code_dir': args.edxapp_code_dir},
+                        "cms": {'python': args.edxapp_python, 'env_file': args.edxapp_env, 'code_dir': args.edxapp_code_dir},
+                        "ecommerce": {'python': args.ecommerce_python, 'env_file': args.ecommerce_env, 'code_dir': args.ecommerce_code_dir},
+                        "programs": {'python': args.programs_python, 'env_file': args.programs_env, 'code_dir': args.programs_code_dir},
+                        "insights": {'python': args.insights_python, 'env_file': args.insights_env, 'code_dir': args.insights_code_dir},
+                        "analytics_api": {'python': args.analytics_api_python, 'env_file': args.analytics_api_env, 'code_dir': args.analytics_api_code_dir}
+                    }
+
+                    if service in new_services and all(arg!=None for arg in new_services[service].values()) and service in MIGRATION_COMMANDS:
+                        serv_vars = new_services[service]
+
+                        cmd = MIGRATION_COMMANDS[service].format(**serv_vars)
+                        if os.path.exists(serv_vars['code_dir']):
+                            os.chdir(serv_vars['code_dir'])
+                            # Run migration check command.
+                            output = subprocess.check_output(cmd, shell=True, )
+                            if '[ ]' in output:
+                                raise Exception("Migrations have not been run for {}".format(service))
+
+
             # Link to available service.
             available_file = os.path.join(args.available, "{}.conf".format(service))
             link_location = os.path.join(args.enabled, "{}.conf".format(service))
             if os.path.exists(available_file):
                 subprocess.call("ln -sf {} {}".format(available_file, link_location), shell=True)
-                report.append("Linking service: {}".format(service))
+                report.append("Enabling service: {}".format(service))
             else:
                 raise Exception("No conf available for service: {}".format(link_location))
     except AWSConnectionError as ae:
@@ -159,6 +258,7 @@ if __name__ == '__main__':
         if notify:
             notify(msg)
         traceback.print_exc()
+        raise e
     else:
         msg = "{}: {}".format(prefix, " | ".join(report))
         print(msg)
